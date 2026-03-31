@@ -507,7 +507,7 @@ isProject: false
 - **文件**：[Schedulers/scheduler.py](Assignment1_2026-main/Schedulers/scheduler.py) 第 25-27 行
 - **Bug**：`lambda_scheduler` 硬编码 `lr_lambda=lambda _: 1.0`，配合 Adam（`base_lr=1.0`）使用时有效学习率恒为 1.0，远高于论文的 0.001。`args.learning_rate` 参数被完全忽略。
 - **影响**：使用 Adam + lambda 组合时，学习率为 1.0（论文值的 1000 倍），训练必然发散。
-- **修复**：改为从 `args.learning_rate` 读取目标学习率作为 lambda 因子：`lr_lambda=lambda _: lr`，使得 `effective_lr = base_lr(1.0) * lr = learning_rate`。
+- **修复**：改为从 `args.learning_rate` 读取目标学习率作为 lambda 因子，使得 `effective_lr = base_lr(1.0) * lr = learning_rate`。使用模块级 `_ConstantLR` 可调用类（而非 lambda 闭包）实现，避免 `torch.save` 序列化 checkpoint 时 pickle 无法序列化局部 lambda 的问题。
 - **状态**：✅ 已修复
 
 ---

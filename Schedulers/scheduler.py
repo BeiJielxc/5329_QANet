@@ -22,11 +22,20 @@ def step_scheduler(optimizer, args):
     )
 
 
+class _ConstantLR:
+    """Picklable constant lr factor (replaces a lambda closure that
+    ``torch.save`` / pickle cannot serialise)."""
+    def __init__(self, lr):
+        self.lr = lr
+    def __call__(self, _):
+        return self.lr
+
+
 def lambda_scheduler(optimizer, args):
     """LambdaLR with a constant factor — uses args.learning_rate so that
     Adam (base_lr=1.0) gets effective lr = learning_rate."""
     lr = getattr(args, "learning_rate", 1e-3)
-    return LambdaLR(optimizer, lr_lambda=lambda _: lr)
+    return LambdaLR(optimizer, lr_lambda=_ConstantLR(lr))
 
 
 # ── Registry ─────────────────────────────────────────────────────────────────
