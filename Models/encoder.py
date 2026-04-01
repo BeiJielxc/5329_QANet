@@ -92,19 +92,35 @@ class EncoderBlock(nn.Module):
     def __init__(self, d_model: int, num_heads: int, dropout: float, conv_num: int, k: int, length: int, init_name: str = "kaiming", act_name: str = "relu", norm_name: str = "layer_norm", norm_groups: int = 8):
         super().__init__()
         self.convs = nn.ModuleList([DepthwiseSeparableConv(d_model, d_model, k, init_name=init_name) for _ in range(conv_num)])
-        # Stochastic-depth dropout: p scales linearly with layer depth.
-        self.conv_drops = nn.ModuleList([Dropout(dropout * (i + 1) / conv_num) for i in range(conv_num)])
         self.drop = Dropout(dropout)
         self.self_att = MultiHeadAttention(d_model, num_heads, dropout)
         self.fc = nn.Linear(d_model, d_model, bias=True)
         self.pos = PosEncoder(d_model, length)
         self.act = get_activation(act_name)
 
-        # Normalization over [C, L]; fixed length required for layer_norm.
         self.normb = get_norm(norm_name, d_model, length, num_groups=norm_groups)
         self.norms = nn.ModuleList([get_norm(norm_name, d_model, length, num_groups=norm_groups) for _ in range(conv_num)])
         self.norme = get_norm(norm_name, d_model, length, num_groups=norm_groups)
-        self.L = conv_num
+
+        self.conv_num = conv_num
+        total_sublayers = conv_num + 2
+        p_L = 0.9
+        self.survival_probs = [
+            1.0 - (l / total_sublayers) * (1.0 - p_L)
+            for l in range(1, total_sublayers + 1)
+        ]
+
+    def _stochastic_depth(self, f_out, residual, sublayer_idx):
+        """Stochastic depth: randomly skip sublayers during training.
+
+        Uses inverted scaling so that test-time forward pass needs no change.
+        """
+        p = self.survival_probs[sublayer_idx]
+        if self.training and p < 1.0:
+            if torch.rand(1).item() > p:
+                return residual
+            return residual + f_out / p
+        return residual + f_out
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         out = self.pos(x)
@@ -112,22 +128,20 @@ class EncoderBlock(nn.Module):
         out = self.normb(out)
 
         for i, conv in enumerate(self.convs):
-            out = conv(out)
-            out = self.act(out)
-            out = out + res
+            f_out = self.act(conv(out))
+            out = self._stochastic_depth(f_out, res, i)
             if (i + 1) % 2 == 0:
-                out = self.conv_drops[i](out)
+                out = self.drop(out)
             res = out
             out = self.norms[i](out)
 
-        out = self.self_att(out, mask)
-        out = out + res
+        f_out = self.self_att(out, mask)
+        out = self._stochastic_depth(f_out, res, self.conv_num)
         out = self.drop(out)
 
         res = out
         out = self.norme(out)
-        out = self.fc(out.transpose(1, 2)).transpose(1, 2)
-        out = self.act(out)
-        out = out + res
+        f_out = self.act(self.fc(out.transpose(1, 2)).transpose(1, 2))
+        out = self._stochastic_depth(f_out, res, self.conv_num + 1)
         out = self.drop(out)
         return out

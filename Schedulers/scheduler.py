@@ -22,20 +22,29 @@ def step_scheduler(optimizer, args):
     )
 
 
-class _ConstantLR:
-    """Picklable constant lr factor (replaces a lambda closure that
-    ``torch.save`` / pickle cannot serialise)."""
-    def __init__(self, lr):
+class _WarmupConstantLR:
+    """Picklable lr schedule: linear warmup then constant.
+
+    For the first ``warmup_steps``, lr ramps linearly from 0 to ``lr``.
+    After that, lr stays at ``lr``.  Works with Adam (base_lr=1.0) so
+    that effective_lr = base_lr * factor = factor.
+    """
+    def __init__(self, lr, warmup_steps=1000):
         self.lr = lr
-    def __call__(self, _):
+        self.warmup_steps = warmup_steps
+
+    def __call__(self, step):
+        if step < self.warmup_steps:
+            return self.lr * step / self.warmup_steps
         return self.lr
 
 
 def lambda_scheduler(optimizer, args):
-    """LambdaLR with a constant factor — uses args.learning_rate so that
-    Adam (base_lr=1.0) gets effective lr = learning_rate."""
+    """LambdaLR with warmup + constant factor — uses args.learning_rate
+    so that Adam (base_lr=1.0) gets effective lr = learning_rate."""
     lr = getattr(args, "learning_rate", 1e-3)
-    return LambdaLR(optimizer, lr_lambda=_ConstantLR(lr))
+    warmup = getattr(args, "warmup_steps", 1000)
+    return LambdaLR(optimizer, lr_lambda=_WarmupConstantLR(lr, warmup))
 
 
 # ── Registry ─────────────────────────────────────────────────────────────────

@@ -45,10 +45,10 @@ def evaluate(
     para_limit:     int   = 400,
     ques_limit:     int   = 50,
     char_limit:     int   = 16,
-    d_model:        int   = 96,
+    d_model:        int   = 128,
     num_heads:      int   = 8,
     glove_dim:      int   = 300,
-    char_dim:       int   = 64,
+    char_dim:       int   = 200,
     dropout:        float = 0.1,
     dropout_char:   float = 0.05,
     pretrained_char: bool = False,
@@ -116,7 +116,14 @@ def evaluate(
 
     ckpt_path = os.path.join(save_dir, ckpt_name)
     ckpt = torch.load(ckpt_path, map_location=DEVICE)
-    model.load_state_dict(ckpt["model_state"])
+    if "ema_state" in ckpt:
+        state = model.state_dict()
+        for k, v in ckpt["ema_state"].items():
+            if k in state:
+                state[k] = v
+        model.load_state_dict(state)
+    else:
+        model.load_state_dict(ckpt["model_state"])
 
     metrics, ans = run_eval(
         model, dev_dataset, dev_eval,

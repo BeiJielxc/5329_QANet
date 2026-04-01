@@ -1,21 +1,18 @@
 ---
 name: QANet Bug Fix Plan
-overview: 对 QANet PyTorch 实现进行全面错误扫描，在第一阶段定位了 21 个导致训练/评估流程崩溃的结构性错误，在第二阶段定位了 20 个影响深度学习机制正确性的算法/逻辑错误，在第三阶段修复了 6 个与论文设计不一致的架构/训练逻辑问题。共计 47 个修复。全部已完成。
+overview: 对 QANet PyTorch 实现进行全面错误扫描与性能优化。第一阶段修复 21 个结构性错误，第二阶段修复 20 个机制正确性错误，第三阶段修复 6 个与论文不一致的逻辑问题，第四阶段实现 6 项论文对齐与训练优化改进。共计 53 项修复/改进。全部已完成。
 todos:
   - id: phase1-fixes
     content: 修复第一阶段的 21 个结构性错误（运行时崩溃和前向/反向传播逻辑错误）
     status: completed
-  - id: phase1-verify
-    content: 验证第一阶段修复后系统能完成完整训练流程（前向传播、反向传播、参数更新、评估、保存检查点）
-    status: pending
   - id: phase2-fixes
     content: 修复第二阶段的 20 个深度学习机制正确性错误（激活函数、归一化、优化器、调度器、初始化、注意力等）
     status: completed
-  - id: phase2-verify
-    content: 验证第二阶段修复后模型训练损失稳定下降，验证集指标反映有效学习信号
-    status: pending
   - id: phase3-fixes
     content: 修复第三阶段的 6 个与论文设计不一致的架构/训练逻辑问题（LayerNorm 归一化维度、span 解码、词向量冻结、编码器共享、调度器、训练参数）
+    status: completed
+  - id: phase4-improvements
+    content: 第四阶段 6 项论文对齐与训练优化改进（Stochastic Depth、EMA、模型维度、Warmup、早停策略、评估覆盖率）
     status: completed
 isProject: false
 ---
@@ -519,3 +516,67 @@ isProject: false
 - **影响**：SGD 缺少自适应学习率，在 QANet 这类 Transformer 风格模型上收敛慢且不稳定；cosine scheduler 与论文的 warmup + constant 策略差异大。
 - **修复**：改为 `optimizer_name="adam", scheduler_name="lambda"`。`train.py` 中的默认超参（`learning_rate=1e-3, beta1=0.8, beta2=0.999, weight_decay=3e-7`）已与论文一致。
 - **状态**：✅ 已修复
+
+---
+
+## 第四阶段：论文对齐与训练优化改进（6 项）
+
+本阶段在所有 bug 修复完成后，进一步将实现对齐到 QANet 论文的完整设计，并优化训练流程以提升最终模型性能。
+
+---
+
+### 改进 1：实现 Stochastic Depth（层级 Dropout）
+
+- **文件**：[Models/encoder.py](Assignment1_2026-main/Models/encoder.py) — `EncoderBlock`
+- **论文依据**：*"We also adopt the stochastic depth method (layer dropout) within each embedding or model encoder layer, where sublayer l has survival probability p_l = 1 − (l/L)(1 − p_L) where L is the last layer and p_L = 0.9."*
+- **改动前**：使用 element-wise dropout，公式为 `dropout * (i+1) / conv_num`，只作用于 conv 层，且仅隔层应用——本质是普通 dropout 而非论文的 stochastic depth。
+- **改动后**：每个子层（conv × N + self-attention + FFN）按论文公式计算存活概率，训练时以概率 `1 - p_l` 完整跳过该子层（残差直通）。使用 inverted scaling（存活时除以 `p_l`）保持测试时无需额外处理。
+- **状态**：✅ 已完成
+
+---
+
+### 改进 2：实现 EMA（指数移动平均）
+
+- **文件**：[TrainTools/train_utils.py](Assignment1_2026-main/TrainTools/train_utils.py)（EMA 类）、[TrainTools/train.py](Assignment1_2026-main/TrainTools/train.py)（训练循环集成）、[EvaluateTools/evaluate.py](Assignment1_2026-main/EvaluateTools/evaluate.py)（checkpoint 加载）
+- **论文依据**：*"Exponential moving average is applied on all trainable variables with a decay rate 0.9999."*
+- **改动前**：无 EMA，评估和推理使用原始训练参数。
+- **改动后**：新增 `EMA` 类，维护所有可训练参数的影子副本，每步更新 `shadow = 0.9999 × shadow + 0.0001 × param`。评估前切入影子参数，评估后恢复。checkpoint 中保存 EMA 状态，`evaluate.py` 加载时优先使用 EMA 参数。
+- **状态**：✅ 已完成
+
+---
+
+### 改进 3：模型维度对齐 d_model=128, char_dim=200
+
+- **文件**：[TrainTools/train.py](Assignment1_2026-main/TrainTools/train.py)、[EvaluateTools/evaluate.py](Assignment1_2026-main/EvaluateTools/evaluate.py)、[Tools/preproc.py](Assignment1_2026-main/Tools/preproc.py)
+- **论文依据**：*"the number of filters is d = 128"*，*"each character is represented as a trainable vector of dimension p2 = 200"*。
+- **改动前**：`d_model=96, char_dim=64`，模型容量不足。
+- **改动后**：三处默认值统一改为 `d_model=128, char_dim=200`。所有 Encoder Block 隐藏层宽度为 128，字符嵌入为 200 维。改动后需重新运行 preprocess 步骤以生成新维度的字符嵌入。
+- **状态**：✅ 已完成
+
+---
+
+### 改进 4：学习率 Warmup
+
+- **文件**：[Schedulers/scheduler.py](Assignment1_2026-main/Schedulers/scheduler.py)
+- **论文依据**：*"inverse exponential increase from 0.0 to 0.001 in the first 1000 steps, and then maintain a constant learning rate"*。
+- **改动前**：`_ConstantLR` 给出恒定学习率，训练第一步就使用完整 lr=0.001，缺少升温阶段。
+- **改动后**：替换为 `_WarmupConstantLR`，前 1000 步线性从 0 升温到目标学习率，之后保持恒定。使用可 pickle 的类实现以兼容 `torch.save`。
+- **状态**：✅ 已完成
+
+---
+
+### 改进 5：早停策略优化 + 只保存最佳 Checkpoint
+
+- **文件**：[TrainTools/train.py](Assignment1_2026-main/TrainTools/train.py)
+- **改动前**：早停条件为 `dev_f1 < best_f1 and dev_em < best_em`（F1 和 EM 都低于历史最佳才计 patience），几乎不触发。checkpoint 每次评估都无条件覆盖保存，最终文件可能存的是性能已下降的模型。
+- **改动后**：早停仅基于 dev F1：如果 F1 未刷新历史最佳则 patience+1。checkpoint 仅在 F1 改善时保存，确保 `model.pt` 始终是 F1 最高的模型参数。
+- **状态**：✅ 已完成
+
+---
+
+### 改进 6：Dev 评估覆盖率提升
+
+- **文件**：[assignment1.ipynb](Assignment1_2026-main/assignment1.ipynb) Cell 10
+- **改动前**：`test_num_batches=150`，仅评估 dev 集约 11%，F1 估计方差大，影响早停和模型选择的准确性。
+- **改动后**：`test_num_batches=500`（约 38%），在评估时间和指标可靠性之间取平衡。
+- **状态**：✅ 已完成

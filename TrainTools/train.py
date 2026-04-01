@@ -20,7 +20,7 @@ from Optimizers import optimizers
 from Schedulers import schedulers
 from Tools import set_seed
 from EvaluateTools.eval_utils import run_eval
-from TrainTools.train_utils import train_single_epoch, save_checkpoint
+from TrainTools.train_utils import train_single_epoch, save_checkpoint, EMA
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -71,10 +71,10 @@ def train(
     para_limit:         int   = 400,
     ques_limit:         int   = 50,
     char_limit:         int   = 16,
-    d_model:            int   = 96,
+    d_model:            int   = 128,
     num_heads:          int   = 8,
     glove_dim:          int   = 300,
-    char_dim:           int   = 64,
+    char_dim:           int   = 200,
     dropout:            float = 0.1,
     dropout_char:       float = 0.05,
     pretrained_char:    bool  = False,
@@ -142,6 +142,7 @@ def train(
     optimizer = optimizers[optimizer_name](params, args)
     scheduler = schedulers[scheduler_name](optimizer, args)
     loss_fn   = losses[loss_name]
+    ema       = EMA(model, decay=0.9999)
 
     best_f1  = 0.0
     best_em  = 0.0
@@ -154,8 +155,10 @@ def train(
         train_loss = train_single_epoch(
             model, optimizer, scheduler, _train_iter,
             steps_this_block, grad_clip, loss_fn, DEVICE,
-            global_step=step0,
+            global_step=step0, ema=ema,
         )
+
+        ema.apply_shadow()
 
         tr_metrics, _ = run_eval(
             model, train_dataset, train_eval,
@@ -172,6 +175,8 @@ def train(
             device=DEVICE, loss_fn=loss_fn,
         )
         print("TEST        loss {loss:8f}  F1 {f1:8f}  EM {exact_match:8f}\n".format(**dv_metrics))
+
+        ema.restore()
 
         current_lr = scheduler.get_last_lr()
         print("Learning rate:", current_lr)
@@ -190,23 +195,22 @@ def train(
         dev_f1 = dv_metrics["f1"]
         dev_em = dv_metrics["exact_match"]
 
-        if dev_f1 < best_f1 and dev_em < best_em:
+        if dev_f1 > best_f1:
+            patience = 0
+            best_f1 = dev_f1
+            best_em = dev_em
+            save_checkpoint(
+                save_dir, ckpt_name, model, optimizer, scheduler,
+                step0 + steps_this_block, best_f1, best_em, vars(args),
+                ema=ema,
+            )
+            with open(os.path.join(log_dir, "answers.json"), "w") as f:
+                json.dump(ans, f)
+        else:
             patience += 1
             if patience > early_stop:
                 print("Early stopping triggered.")
                 break
-        else:
-            patience = 0
-            best_f1  = max(best_f1, dev_f1)
-            best_em  = max(best_em, dev_em)
-
-        save_checkpoint(
-            save_dir, ckpt_name, model, optimizer, scheduler,
-            step0 + steps_this_block, best_f1, best_em, vars(args),
-        )
-
-        with open(os.path.join(log_dir, "answers.json"), "w") as f:
-            json.dump(ans, f)
 
     print(f"Training finished.  Best F1: {best_f1:.4f}  Best EM: {best_em:.4f}")
 

@@ -256,7 +256,7 @@ def preprocess(
     log_dir: str = "_log",
     # --- Shape / limit parameters ---
     glove_dim: int = 300,
-    char_dim: int = 64,
+    char_dim: int = 200,
     para_limit: int = 400,
     ques_limit: int = 50,
     ans_limit: int = 30,
