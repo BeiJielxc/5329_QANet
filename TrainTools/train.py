@@ -158,8 +158,6 @@ def train(
             global_step=step0, ema=ema,
         )
 
-        ema.apply_shadow()
-
         tr_metrics, _ = run_eval(
             model, train_dataset, train_eval,
             num_batches=val_num_batches, batch_size=batch_size,
@@ -175,8 +173,6 @@ def train(
             device=DEVICE, loss_fn=loss_fn,
         )
         print("TEST        loss {loss:8f}  F1 {f1:8f}  EM {exact_match:8f}\n".format(**dv_metrics))
-
-        ema.restore()
 
         current_lr = scheduler.get_last_lr()
         print("Learning rate:", current_lr)

@@ -540,7 +540,7 @@ isProject: false
 - **文件**：[TrainTools/train_utils.py](Assignment1_2026-main/TrainTools/train_utils.py)（EMA 类）、[TrainTools/train.py](Assignment1_2026-main/TrainTools/train.py)（训练循环集成）、[EvaluateTools/evaluate.py](Assignment1_2026-main/EvaluateTools/evaluate.py)（checkpoint 加载）
 - **论文依据**：*"Exponential moving average is applied on all trainable variables with a decay rate 0.9999."*
 - **改动前**：无 EMA，评估和推理使用原始训练参数。
-- **改动后**：新增 `EMA` 类，维护所有可训练参数的影子副本，每步更新 `shadow = 0.9999 × shadow + 0.0001 × param`。评估前切入影子参数，评估后恢复。checkpoint 中保存 EMA 状态，`evaluate.py` 加载时优先使用 EMA 参数。
+- **改动后**：新增 `EMA` 类，维护所有可训练参数的影子副本，每步更新 `shadow = 0.9999 × shadow + 0.0001 × param`。EMA 状态保存在 checkpoint 中，`evaluate.py` 加载时优先使用 EMA 参数。注意：训练过程中的中间评估（用于早停和模型选择）使用原始训练参数，不切换 EMA 影子参数——因为 EMA 的有效平均窗口约 10000 步（`1/(1-0.9999)`），训练早期影子参数中仍有大量初始随机权重（如 5800 步时约 56%），若用于评估会严重低估模型真实性能，导致早停误触发。EMA 仅在最终独立评估时通过 `evaluate.py` 加载使用。
 - **状态**：✅ 已完成
 
 ---
