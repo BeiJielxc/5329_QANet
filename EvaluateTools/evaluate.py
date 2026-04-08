@@ -115,8 +115,13 @@ def evaluate(
     dev_dataset = SQuADDataset(dev_npz)
 
     ckpt_path = os.path.join(save_dir, ckpt_name)
-    ckpt = torch.load(ckpt_path, map_location=DEVICE)
+    ckpt = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
     model.load_state_dict(ckpt["model_state"])
+    # Use EMA weights if available (they produce higher F1 than raw weights)
+    if "ema_state" in ckpt:
+        for name, param in model.named_parameters():
+            if name in ckpt["ema_state"]:
+                param.data.copy_(ckpt["ema_state"][name])
 
     metrics, ans = run_eval(
         model, dev_dataset, dev_eval,

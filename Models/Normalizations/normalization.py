@@ -11,23 +11,6 @@ normalizations = {
 }
 
 
-class _ChannelLayerNorm(nn.Module):
-    """Wraps LayerNorm to normalize over the channel dim of [B, C, L] tensors.
-
-    Standard LayerNorm operates on the last dimension; this wrapper transposes
-    so that the channel dimension C becomes last, applies LN, then transposes
-    back.  This matches the standard Transformer pre-norm convention where each
-    position is normalized independently over its feature vector.
-    """
-
-    def __init__(self, d_model: int):
-        super().__init__()
-        self.norm = LayerNorm(d_model)
-
-    def forward(self, x):
-        return self.norm(x.transpose(1, 2)).transpose(1, 2)
-
-
 def get_norm(name: str, d_model: int, length: int, num_groups: int = 8) -> nn.Module:
     """
     Instantiate a normalization module by registry name.
@@ -35,15 +18,15 @@ def get_norm(name: str, d_model: int, length: int, num_groups: int = 8) -> nn.Mo
     Args:
         name:       one of "layer_norm", "group_norm"
         d_model:    number of channels (C)
-        length:     sequence length (L); kept for API compat, unused by layer_norm
+        length:     sequence length (L); used only by layer_norm
         num_groups: number of groups; used only by group_norm
 
     Returns:
         nn.Module instance of the requested normalization.
 
     Shapes:
-        "layer_norm" → _ChannelLayerNorm(d_model)
-            normalizes over the channel dim C of [B, C, L], each position independent
+        "layer_norm" → LayerNorm([d_model, length])
+            normalizes over the last two dims of [B, d_model, length]
         "group_norm"  → GroupNorm(num_groups, d_model)
             normalizes over [C/G, *spatial] per group of [B, d_model, *]
     """
@@ -52,6 +35,9 @@ def get_norm(name: str, d_model: int, length: int, num_groups: int = 8) -> nn.Mo
             f"Unknown normalization '{name}'. Available: {list(normalizations.keys())}"
         )
     if name == "layer_norm":
-        return _ChannelLayerNorm(d_model)
+        # Normalize over C only (per position), as in the QANet paper.
+        # Input is [B, C, L]; normalizing over dim=-2 (C) means each position
+        # gets its own mean/var computed across channels only.
+        return LayerNorm([d_model, 1])
     else:  # group_norm
         return GroupNorm(num_groups, d_model)

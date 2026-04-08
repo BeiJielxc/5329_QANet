@@ -7,6 +7,7 @@ Usage:
 """
 
 import argparse
+import contextlib
 import os
 
 import ujson as json
@@ -20,7 +21,7 @@ from Optimizers import optimizers
 from Schedulers import schedulers
 from Tools import set_seed
 from EvaluateTools.eval_utils import run_eval
-from TrainTools.train_utils import train_single_epoch, save_checkpoint
+from TrainTools.train_utils import train_single_epoch, save_checkpoint, EMA
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -66,6 +67,7 @@ def train(
     # ── Scheduler hyperparameters ─────────────────────────────────────────────
     lr_step_size:       int   = 10000,  # step: decay every n steps
     lr_gamma:           float = 0.5,    # step: multiplicative decay factor
+    warmup_steps:       int   = 1000,   # lambda: linear warmup duration
 
     # ── Model architecture ────────────────────────────────────────────────────
     para_limit:         int   = 400,
@@ -78,6 +80,9 @@ def train(
     dropout:            float = 0.1,
     dropout_char:       float = 0.05,
     pretrained_char:    bool  = False,
+
+    # ── EMA ───────────────────────────────────────────────────────────────────
+    ema_decay:          float = 0.9999,     # set to 0.0 to disable EMA
 
     # ── Stubs for bug-injection phase ─────────────────────────────────────────
     use_batch_norm:     bool  = False,
@@ -143,6 +148,10 @@ def train(
     scheduler = schedulers[scheduler_name](optimizer, args)
     loss_fn   = losses[loss_name]
 
+    # EMA — decay=0.0 disables it
+    ema = EMA(model, decay=ema_decay) if ema_decay > 0.0 else None
+    _null_ctx = contextlib.nullcontext
+
     best_f1  = 0.0
     best_em  = 0.0
     patience = 0
@@ -154,23 +163,26 @@ def train(
         train_loss = train_single_epoch(
             model, optimizer, scheduler, _train_iter,
             steps_this_block, grad_clip, loss_fn, DEVICE,
-            global_step=step0,
+            global_step=step0, ema=ema,
         )
 
-        tr_metrics, _ = run_eval(
-            model, train_dataset, train_eval,
-            num_batches=val_num_batches, batch_size=batch_size,
-            use_random_batches=True,
-            device=DEVICE, loss_fn=loss_fn,
-        )
-        print("VALID(train) loss {loss:8f}  F1 {f1:8f}  EM {exact_match:8f}\n".format(**tr_metrics))
+        # Evaluate — bias-corrected EMA is valid from step 1
+        eval_ctx = ema.apply(model) if ema is not None else _null_ctx()
+        with eval_ctx:
+            tr_metrics, _ = run_eval(
+                model, train_dataset, train_eval,
+                num_batches=val_num_batches, batch_size=batch_size,
+                use_random_batches=True,
+                device=DEVICE, loss_fn=loss_fn,
+            )
+            print("VALID(train) loss {loss:8f}  F1 {f1:8f}  EM {exact_match:8f}\n".format(**tr_metrics))
 
-        dv_metrics, ans = run_eval(
-            model, dev_dataset, dev_eval,
-            num_batches=test_num_batches, batch_size=batch_size,
-            use_random_batches=False,
-            device=DEVICE, loss_fn=loss_fn,
-        )
+            dv_metrics, ans = run_eval(
+                model, dev_dataset, dev_eval,
+                num_batches=test_num_batches, batch_size=batch_size,
+                use_random_batches=False,
+                device=DEVICE, loss_fn=loss_fn,
+            )
         print("TEST        loss {loss:8f}  F1 {f1:8f}  EM {exact_match:8f}\n".format(**dv_metrics))
 
         current_lr = scheduler.get_last_lr()
@@ -190,19 +202,21 @@ def train(
         dev_f1 = dv_metrics["f1"]
         dev_em = dv_metrics["exact_match"]
 
-        if dev_f1 < best_f1 and dev_em < best_em:
-            patience += 1
-            if patience > early_stop:
-                print("Early stopping triggered.")
-                break
-        else:
-            patience = 0
-            best_f1  = max(best_f1, dev_f1)
-            best_em  = max(best_em, dev_em)
+        current_step = step0 + steps_this_block
+        if current_step > warmup_steps * 10:
+            if dev_f1 < best_f1 and dev_em < best_em:
+                patience += 1
+                if patience > early_stop:
+                    print("Early stopping triggered.")
+                    break
+            else:
+                patience = 0
+        best_f1 = max(best_f1, dev_f1)
+        best_em = max(best_em, dev_em)
 
         save_checkpoint(
             save_dir, ckpt_name, model, optimizer, scheduler,
-            step0 + steps_this_block, best_f1, best_em, vars(args),
+            step0 + steps_this_block, best_f1, best_em, vars(args), ema=ema,
         )
 
         with open(os.path.join(log_dir, "answers.json"), "w") as f:

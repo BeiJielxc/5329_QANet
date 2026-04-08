@@ -71,7 +71,7 @@ def process_file(filename: str, data_type: str, word_counter: Counter, char_coun
     examples = []
     eval_examples = {}
     total = 0
-    with open(filename, "r") as fh:
+    with open(filename, "r", encoding="utf-8") as fh:
         source = json.load(fh)
         for article in tqdm(source["data"]):
             for para in article["paragraphs"]:
@@ -152,7 +152,7 @@ def get_embedding(counter: Counter, data_type: str, limit: int = -1,
     token2idx[null_tok] = 0
     token2idx[oov_tok] = 1
     embedding_dict[null_tok] = [0.0] * vec_size
-    embedding_dict[oov_tok] = [np.random.normal(scale=0.1) for _ in range(vec_size)]
+    embedding_dict[oov_tok] = [0.0] * vec_size
     idx2emb = {idx: embedding_dict[tok] for tok, idx in token2idx.items()}
     emb_mat = [idx2emb[i] for i in range(len(idx2emb))]
     return emb_mat, token2idx
@@ -235,7 +235,7 @@ def save_json(filename: str, obj, message: str = None) -> None:
     if message:
         print(f"Saving {message}…")
     ensure_parent(filename)
-    with open(filename, "w") as fh:
+    with open(filename, "w", encoding="utf-8") as fh:
         json.dump(obj, fh)
 
 
