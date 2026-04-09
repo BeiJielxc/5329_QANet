@@ -52,6 +52,11 @@ def evaluate(
     dropout:        float = 0.1,
     dropout_char:   float = 0.05,
     pretrained_char: bool = False,
+    norm_name:       str  = "layer_norm",
+
+    # ── Experiment switches (must match training config) ──────────────────────
+    use_scaled_attn:    bool  = False,
+    conv_dropout_mode:  str   = "stochastic_depth",
 ) -> dict:
     """Evaluate a saved QANet checkpoint on the SQuAD v1.1 dev set.
 
@@ -106,6 +111,9 @@ def evaluate(
         dropout=dropout,
         dropout_char=dropout_char,
         pretrained_char=pretrained_char,
+        norm_name=norm_name,
+        use_scaled_attn=use_scaled_attn,
+        conv_dropout_mode=conv_dropout_mode,
     )
 
     word_mat, char_mat = load_word_char_mats(args)

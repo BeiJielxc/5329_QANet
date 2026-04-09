@@ -88,6 +88,10 @@ def train(
     use_batch_norm:     bool  = False,
     activation:         str   = "relu",
     init_name:          str   = "kaiming",  # "kaiming" | "kaiming_uniform" | "xavier" | "xavier_normal"
+
+    # ── Experiment switches ───────────────────────────────────────────────────
+    use_scaled_attn:    bool  = False,      # Exp1: multiply Q·K^T by 1/sqrt(d_k)
+    conv_dropout_mode:  str   = "stochastic_depth",  # Exp2: "stochastic_depth" | "uniform" | "stochastic_depth_all" | "none"
 ) -> dict:
     """
     Train QANet on SQuAD v1.1.
