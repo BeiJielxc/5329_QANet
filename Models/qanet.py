@@ -33,6 +33,8 @@ class QANet(nn.Module):
         act_name    = str(getattr(args, "activation",  "relu"))
         norm_name   = str(getattr(args, "norm_name",   "layer_norm"))
         norm_groups = int(getattr(args, "norm_groups", 8))
+        use_scaled_attn   = bool(getattr(args, "use_scaled_attn", False))
+        conv_dropout_mode = str(getattr(args, "conv_dropout_mode", "stochastic_depth"))
 
         self.char_emb = nn.Embedding.from_pretrained(
             torch.tensor(char_mat, dtype=torch.float32),
@@ -44,14 +46,16 @@ class QANet(nn.Module):
         )
 
         self.emb = Embedding(d_word, d_char, dropout, dropout_char, init_name=init_name, act_name=act_name)
-        self.emb_conv = DepthwiseSeparableConv(d_word + d_char, d_model, 5, init_name=init_name)
+        self.context_conv = DepthwiseSeparableConv(d_word + d_char, d_model, 5, init_name=init_name)
+        self.question_conv = DepthwiseSeparableConv(d_word + d_char, d_model, 5, init_name=init_name)
 
-        self.emb_enc = EncoderBlock(d_model, num_heads, dropout, conv_num=4, k=7, length=max(len_c, len_q), init_name=init_name, act_name=act_name, norm_name=norm_name, norm_groups=norm_groups)
+        self.c_emb_enc = EncoderBlock(d_model, num_heads, dropout, conv_num=4, k=7, length=len_c, init_name=init_name, act_name=act_name, norm_name=norm_name, norm_groups=norm_groups, use_scaled_attn=use_scaled_attn, conv_dropout_mode=conv_dropout_mode)
+        self.q_emb_enc = EncoderBlock(d_model, num_heads, dropout, conv_num=4, k=7, length=len_q, init_name=init_name, act_name=act_name, norm_name=norm_name, norm_groups=norm_groups, use_scaled_attn=use_scaled_attn, conv_dropout_mode=conv_dropout_mode)
 
         self.cq_att = CQAttention(d_model, dropout)
         self.cq_resizer = DepthwiseSeparableConv(d_model * 4, d_model, 5, init_name=init_name)
 
-        base_enc = EncoderBlock(d_model, num_heads, dropout, conv_num=2, k=5, length=len_c, init_name=init_name, act_name=act_name, norm_name=norm_name, norm_groups=norm_groups)
+        base_enc = EncoderBlock(d_model, num_heads, dropout, conv_num=2, k=5, length=len_c, init_name=init_name, act_name=act_name, norm_name=norm_name, norm_groups=norm_groups, use_scaled_attn=use_scaled_attn, conv_dropout_mode=conv_dropout_mode)
         self.model_enc_blks = nn.ModuleList([copy.deepcopy(base_enc) for _ in range(7)])
 
         self.out = Pointer(d_model)
@@ -64,11 +68,11 @@ class QANet(nn.Module):
         Qw, Qc = self.word_emb(Qwid), self.char_emb(Qcid)
 
         C, Q = self.emb(Cc, Cw), self.emb(Qc, Qw)
-        C = self.emb_conv(C)
-        Q = self.emb_conv(Q)
+        C = self.context_conv(C)
+        Q = self.question_conv(Q)
 
-        Ce = self.emb_enc(C, cmask)
-        Qe = self.emb_enc(Q, qmask)
+        Ce = self.c_emb_enc(C, cmask)
+        Qe = self.q_emb_enc(Q, qmask)
 
         X = self.cq_att(Ce, Qe, cmask, qmask)
 

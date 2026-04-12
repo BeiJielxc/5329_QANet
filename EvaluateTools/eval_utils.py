@@ -104,14 +104,15 @@ def run_eval(model, dataset, eval_file, num_batches, batch_size,
         loss = loss_fn(p1, p2, y1, y2)
         losses.append(float(loss.item()))
 
-        max_ans_len = 30
+        # Joint span search: find argmax_{s<=e} p1[s] + p2[e]
+        # Step 1: suffix_max_p2[i] = max(p2[i:])  — best end score for each start
         B, L = p1.size()
-        score = p1.unsqueeze(2) + p2.unsqueeze(1)  # [B, L_s, L_e]
-        valid = torch.ones(L, L, dtype=torch.bool, device=p1.device).triu(0).tril(max_ans_len - 1)
-        score.masked_fill_(~valid.unsqueeze(0), float('-inf'))
-        flat_idx = score.view(B, -1).argmax(dim=1)
-        yp1 = flat_idx // L
-        yp2 = flat_idx % L
+        suffix_max_p2 = torch.cummax(p2.flip(1), dim=1)[0].flip(1)  # [B, L]
+        # Step 2: best start = argmax(p1[s] + suffix_max_p2[s])
+        yp1 = torch.argmax(p1 + suffix_max_p2, dim=1)  # [B]
+        # Step 3: best end >= start
+        end_mask = torch.arange(L, device=p1.device).unsqueeze(0) < yp1.unsqueeze(1)
+        yp2 = torch.argmax(p2.masked_fill(end_mask, -1e30), dim=1)  # [B]
 
         answer_dict_, _ = convert_tokens(eval_file, ids.tolist(), yp1.tolist(), yp2.tolist())
         answer_dict.update(answer_dict_)
