@@ -1,0 +1,44 @@
+{
+  "exp2_A_stochastic_depth_seed42": {
+    "group": "A_stochastic_depth",
+    "mode": "stochastic_depth",
+    "seed": 42,
+    "best_f1": 42.71124530718573,
+    "best_em": 33.479166666666664
+  },
+  "exp2_A_stochastic_depth_seed13": {
+    "group": "A_stochastic_depth",
+    "mode": "stochastic_depth",
+    "seed": 13,
+    "best_f1": 40.99651997320064,
+    "best_em": 31.958333333333332
+  },
+  "exp2_A_stochastic_depth_seed7": {
+    "group": "A_stochastic_depth",
+    "mode": "stochastic_depth",
+    "seed": 7,
+    "best_f1": 40.43897999227221,
+    "best_em": 31.458333333333332
+  },
+  "exp2_B_uniform_seed42": {
+    "group": "B_uniform",
+    "mode": "uniform",
+    "seed": 42,
+    "best_f1": 42.06143664684345,
+    "best_em": 33.333333333333336
+  },
+  "exp2_B_uniform_seed13": {
+    "group": "B_uniform",
+    "mode": "uniform",
+    "seed": 13,
+    "best_f1": 40.99468735458281,
+    "best_em": 32.145833333333336
+  },
+  "exp2_B_uniform_seed7": {
+    "group": "B_uniform",
+    "mode": "uniform",
+    "seed": 7,
+    "best_f1": 40.33900687196632,
+    "best_em": 31.625
+  }
+}
