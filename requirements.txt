@@ -6,3 +6,7 @@ msgpack-numpy
 tqdm
 ujson
 tensorboard
+numpy
+matplotlib
+scipy
+torch
